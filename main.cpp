@@ -12,21 +12,49 @@ int main()
 {
     school_impl s;
 
-    auto* c = new cat_basic();
+    auto *c = new cat_basic();
     s.add_cat(c);
 
-    auto* c2 = new cat_basic();
+    auto *c2 = new cat_basic();
     s.add_cat(c2);
     c2->add_exp(5000);
 
-    auto* r = new room_talking(&s);
+    auto *r = new room_talking(&s);
     s.add_room(r);
     r->add_cat(c, PUPIL);
     r->add_cat(c2, TEACHER);
 
-    s.skip_day();
+    for (int i = 0; i < 10; ++i)
+        s.skip_day();
+    s.print_events(std::cout);
 
     return 0;
+}
+
+int room::top_level(const who w) const
+{
+    int lvl = 0;
+    const int n = n_cats(w);
+    for (int i = 0; i < n; ++i)
+        lvl = std::max(lvl, cat_at(i, w)->level());
+    return lvl;
+}
+
+void event::print_with_date(std::ostream &os) const
+{
+    os << "(";
+    school::print_time(os, _day);
+    os << "): ";
+    print(os);
+}
+
+void school::print_time(std::ostream &os, const int day)
+{
+    if (day >= 336)
+        os << "year " << day / 336 << ", ";
+    os << "month " << (day % 336) / 28 + 1;
+    os << ", week " << (day % 28) / 7 + 1;
+    os << ", day " << day % 7 + 1;
 }
 
 bool school::is_time(const when w, const int offset, const int multiplier) const
@@ -51,24 +79,29 @@ int school::rng(const int max)
     return distribution(rng());
 }
 
-void school_impl::add_room(room* r)
+void school_impl::add_room(room *r)
 {
     _rooms.emplace_back(r);
 }
 
-void school_impl::add_cat(cat* c)
+void school_impl::add_cat(cat *c)
 {
     _cats.emplace_back(c);
 }
 
-void school_impl::add_exam(exam* e)
+void school_impl::add_exam(exam *e)
 {
     _exams.emplace_back(e);
 }
 
-void school_impl::take_cat(cat* c)
+void school_impl::add_event(event *e)
 {
-    for (const auto& room : _rooms)
+    _events.emplace_back(e);
+}
+
+void school_impl::take_cat(cat *c)
+{
+    for (const auto &room : _rooms)
         if (room->remove_cat(c)) return;
 }
 
@@ -76,24 +109,25 @@ void school_impl::skip_day()
 {
     // take those who are on exams from rooms
     std::map<exam*, std::vector<cat*>> _cats_on_exam;
-    for (const auto& exam : _exams) {
+    for (const auto &exam : _exams) {
         if (const auto [w, m] = exam->period(); !is_time(w, 0, m))
             continue;
         const auto [from, who, _1, _2] = exam->rooms();
         for (int i = 0; i < exam->capacity(); ++i) {
-            auto* cat = from->random_cat(who);
+            const int n_cats = from->n_cats(who);
+            auto *cat = n_cats ? from->cat_at(school::rng(n_cats), who) : nullptr;
             if (!cat) break;
             from->remove_cat(cat);
             _cats_on_exam[exam.get()].push_back(cat);
         }
     }
 
-    for (const auto& room : _rooms)
+    for (const auto &room : _rooms)
         room->skip_day();
 
     // run exams and return cats
-    for (const auto& [e, cs] : _cats_on_exam) {
-        for (cat* c : cs) {
+    for (const auto &[e, cs] : _cats_on_exam) {
+        for (cat *c : cs) {
             const auto [from, whofrom, to, whoto] = e->rooms();
             if (!e->passed(*c)) {
                 from->add_cat(c, whofrom);
@@ -107,13 +141,26 @@ void school_impl::skip_day()
         }
     }
 
-    for (const auto& cat : _cats)
+    for (const auto &cat : _cats)
         cat->skip_day();
 
     _day += 1;
 }
 
-void school_impl::replace_cat(const cat* from, cat* to)
+void school_impl::print_events(std::ostream &os) const
+{
+    for (const auto &e : _events) {
+        e->print_with_date(os);
+        os << "\n";
+    }
+}
+
+void school_impl::clear_events()
+{
+    _events.clear();
+}
+
+void school_impl::replace_cat(const cat *from, cat *to)
 {
     for (auto &cat : _cats) {
         if (cat.get() != from) continue;
@@ -121,6 +168,11 @@ void school_impl::replace_cat(const cat* from, cat* to)
         return;
     }
     assert(false && "unreachable");
+}
+
+std::string cat_basic::name() const
+{
+    return "Basic Cat's Name";
 }
 
 void cat_basic::add_exp(const int exp)
@@ -147,11 +199,11 @@ int cat_basic::exp_threshold_for_level(const int level)
     return (level < 8) ? exp : ((level - 7) * 150000);
 }
 
-room_impl::room_impl(school* s) : _school(s)
+room_impl::room_impl(school *s) : _school(s)
 {
 }
 
-void room_impl::add_cat(cat* c, const who w)
+void room_impl::add_cat(cat *c, const who w)
 {
     _school->take_cat(c);
     switch (w) {
@@ -171,9 +223,9 @@ void room_impl::skip_day()
     daily_lesson(_pupils, _teachers);
 }
 
-bool room_impl::remove_cat(cat* c)
+bool room_impl::remove_cat(cat *c)
 {
-    const auto remove_from = [](std::vector<cat*>& vec, const cat* target) -> bool {
+    const auto remove_from = [](std::vector<cat*> &vec, const cat *target) -> bool {
         if (const auto it = std::find(vec.begin(), vec.end(), target); it != vec.end()) {
             vec.erase(it);
             return true;
@@ -183,13 +235,25 @@ bool room_impl::remove_cat(cat* c)
     return remove_from(_pupils, c) || remove_from(_teachers, c);
 }
 
-cat* room_impl::random_cat(const who w) const
+int room_impl::n_cats(const who w) const
 {
     switch (w) {
     case PUPIL:
-        return _pupils.empty() ? nullptr : _pupils.at(_school->rng(_pupils.size()));
+        return static_cast<int>(_pupils.size());
     case TEACHER:
-        return _teachers.empty() ? nullptr : _teachers.at(_school->rng(_teachers.size()));
+        return static_cast<int>(_teachers.size());
+    default:
+        assert(false && "unreachable");
+    }
+}
+
+cat *room_impl::cat_at(const int idx, const who w) const
+{
+    switch (w) {
+    case PUPIL:
+        return _pupils.empty() ? nullptr : _pupils.at(idx);
+    case TEACHER:
+        return _teachers.empty() ? nullptr : _teachers.at(idx);
     default:
         break;
     }
@@ -209,7 +273,7 @@ void exam_impl::set_period(const when w, const int multiplier)
     _multiplier = multiplier;
 }
 
-void exam_impl::set_rooms(room* from, const who whofrom, room* to, const who whoto)
+void exam_impl::set_rooms(room *from, const who whofrom, room *to, const who whoto)
 {
     assert(from && "no source room");
     assert(to && "no destination room");
@@ -219,7 +283,7 @@ void exam_impl::set_rooms(room* from, const who whofrom, room* to, const who who
     _whoto = whoto;
 }
 
-void room_talking::daily_lesson(const std::vector<cat*>& pupils, const std::vector<cat*>& teachers)
+void room_talking::daily_lesson(const std::vector<cat*> &pupils, const std::vector<cat*> &teachers)
 {
     if (pupils.empty() || teachers.empty())
         return;
@@ -231,9 +295,34 @@ void room_talking::daily_lesson(const std::vector<cat*>& pupils, const std::vect
     std::shuffle(teachers_shuffled.begin(), teachers_shuffled.end(), _school->rng());
 
     for (size_t i = 0; i < std::min(pupils.size(), teachers.size()); ++i) {
-        cat& pupil = *pupils_shuffled[i];
-        const cat& teacher = *teachers_shuffled[i];
-        if (pupil.level() < teacher.level())
-            pupil.add_exp((teacher.level() - pupil.level()) * 10);
+        cat &pupil = *pupils_shuffled[i];
+        const cat &teacher = *teachers_shuffled[i];
+        if (pupil.level() < teacher.level()) {
+            const int xp = (teacher.level() - pupil.level()) * 10;
+            pupil.add_exp(xp);
+            _school->add_event(new event_cat_learned(_school->day(), &pupil, &teacher, xp));
+        }
     }
+}
+
+bool exam_top_level::passed(const cat &c) const
+{
+    const auto [from, who, _1, _2] = rooms();
+    return c.level() >= from->top_level(who);
+}
+
+std::string exam_top_level::name() const
+{
+    return "Top Level";
+}
+
+event_cat_learned::event_cat_learned(const int day, const cat *pupil, const cat *teacher, const int xp) :
+    event(day), _pupil(pupil), _teacher(teacher), _xp(xp)
+{
+    assert(_pupil && _teacher && xp > 0);
+}
+
+void event_cat_learned::print(std::ostream &os) const
+{
+    os << _pupil->name() << " gained " << _xp << "xp by learning from " << _teacher->name();
 }
