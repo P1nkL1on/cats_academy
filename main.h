@@ -123,15 +123,16 @@ private:
 class cat_basic : public cat
 {
 public:
+    void set_name(const std::string &name);
     std::string name() const override;
     void add_exp(int exp) override;
     void skip_day() override;
     int level() const override { return _level; }
     static int exp_threshold_for_level(int level);
-
 private:
     int _exp = 0;
     int _level = 1;
+    std::string _name = "Basic Cat's Name";
 };
 
 
@@ -204,6 +205,18 @@ private:
     const cat *_pupil = nullptr;
     const cat *_teacher = nullptr;
     int _xp = 0;
+};
+
+
+class event_cat_attempted_an_exam : public event
+{
+public:
+    event_cat_attempted_an_exam(int day, const cat *c, const exam *e, bool passed);
+    void print(std::ostream &os) const override;
+private:
+    const cat *_cat = nullptr;
+    const exam *_exam = nullptr;
+    bool _passed = false;
 };
 
 #endif //MAIN_H

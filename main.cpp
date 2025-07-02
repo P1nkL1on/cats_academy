@@ -12,19 +12,22 @@ int main()
 {
     school_impl s;
 
-    auto *c = new cat_basic();
-    s.add_cat(c);
-
-    auto *c2 = new cat_basic();
-    s.add_cat(c2);
-    c2->add_exp(5000);
-
     auto *r = new room_talking(&s);
     s.add_room(r);
-    r->add_cat(c, PUPIL);
-    r->add_cat(c2, TEACHER);
 
-    for (int i = 0; i < 10; ++i)
+    for (int i = 0; i < 10; ++i) {
+        auto *c = new cat_basic();
+        s.add_cat(c);
+        c->set_name(i == 0 ? "Biggo" : ("Smallo" + std::to_string(i)));
+        c->add_exp(i == 0 ? 5000 : 0);
+        r->add_cat(c, PUPIL);
+    }
+    auto *e = new exam_top_level();
+    e->set_period(WEEKLY, 2);
+    e->set_rooms(r, PUPIL, r, TEACHER);
+    s.add_exam(e);
+
+    for (int i = 0; i < 100; ++i)
         s.skip_day();
     s.print_events(std::cout);
 
@@ -59,7 +62,8 @@ void school::print_time(std::ostream &os, const int day)
 
 bool school::is_time(const when w, const int offset, const int multiplier) const
 {
-    switch (const int d = day() * multiplier + offset) {
+    const int d = day() * multiplier + offset;
+    switch (w) {
     case DAILY:
         return true;
     case WEEKLY:
@@ -129,7 +133,8 @@ void school_impl::skip_day()
     for (const auto &[e, cs] : _cats_on_exam) {
         for (cat *c : cs) {
             const auto [from, whofrom, to, whoto] = e->rooms();
-            if (!e->passed(*c)) {
+            const bool passed = e->passed(*c);
+            if (!passed) {
                 from->add_cat(c, whofrom);
             } else {
                 if (cat *newc = e->change_cat(c); newc != c) {
@@ -138,6 +143,7 @@ void school_impl::skip_day()
                 }
                 to->add_cat(c, whoto);
             }
+            add_event(new event_cat_attempted_an_exam(day(), c, e, passed));
         }
     }
 
@@ -170,9 +176,14 @@ void school_impl::replace_cat(const cat *from, cat *to)
     assert(false && "unreachable");
 }
 
+void cat_basic::set_name(const std::string &name)
+{
+    _name = name;
+}
+
 std::string cat_basic::name() const
 {
-    return "Basic Cat's Name";
+    return _name;
 }
 
 void cat_basic::add_exp(const int exp)
@@ -307,8 +318,11 @@ void room_talking::daily_lesson(const std::vector<cat*> &pupils, const std::vect
 
 bool exam_top_level::passed(const cat &c) const
 {
-    const auto [from, who, _1, _2] = rooms();
-    return c.level() >= from->top_level(who);
+    const auto [from, whofrom, to, whoto] = rooms();
+    if (const bool someone_passed = to->n_cats(whoto) > 0)
+        return c.level() > from->top_level(whofrom);
+
+    return c.level() >= from->top_level(whofrom);
 }
 
 std::string exam_top_level::name() const
@@ -325,4 +339,17 @@ event_cat_learned::event_cat_learned(const int day, const cat *pupil, const cat 
 void event_cat_learned::print(std::ostream &os) const
 {
     os << _pupil->name() << " gained " << _xp << "xp by learning from " << _teacher->name();
+}
+
+event_cat_attempted_an_exam::event_cat_attempted_an_exam(
+    const int day, const cat *c, const exam *e, const bool passed) :
+    event(day), _cat(c), _exam(e), _passed(passed)
+{
+}
+
+void event_cat_attempted_an_exam::print(std::ostream &os) const
+{
+    os << _cat->name() << " ";
+    os << (_passed ? "passed" : "failed");
+    os << " an exam " << _exam->name();
 }
