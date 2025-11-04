@@ -68,22 +68,27 @@ struct ui
         next_roll_10,
         next_roll_100,
 
+        room_upgrade_first = 20000,
         max_rooms = 100,
         max_room_actions = 900,
         max_room_upgrades = 100,
         max_room_signals = max_room_actions + max_room_upgrades,
-        room_upgrade_first = 20000,
         room_upgrade_last  = room_upgrade_first + max_rooms * max_room_signals - 1,
         room_action_sell = 1,
         room_action_move_up,
         room_action_move_down,
+
+        room_buy_first = 120000,
+        room_buy_last = 121000,
     };
     static signal mk_signal(int r, int u);
     static signal mk_room_action(int r, int u);
     static signal mk_room_upgrade(int r , int u);
+    static signal mk_room_buy(int s);
     static bool rd_signal(signal, int &r, int &u);
     static bool rd_room_action(signal, int &r, int &u);
     static bool rd_room_upgrade(signal, int &r, int &u);
+    static bool rd_room_buy(signal, int &s);
 
     virtual ~ui() = default;
     virtual ui &operator<<(int) = 0;
@@ -124,6 +129,7 @@ struct state
     bool btn(ui::signal);
     bool move_room(int r, int mod);
     bool sell_room(int r);
+    bool buy_room(int u);
 
 private:
     map<dice_hash, int> dice_count_;
@@ -175,6 +181,7 @@ struct room
     virtual void draw_info(ui &) const {}
     virtual str name() const { return "Room"; }
     virtual int price() const { return 100; }
+    virtual room *duplicate() const = 0;
 protected:
     virtual bool activate_(state &) { return false; }
     virtual int activates_max_() const { return 1; }
@@ -204,7 +211,13 @@ private:
     double mult_ = 0;
 };
 
-struct herbalist : room
+template <typename room_impl>
+struct room_duplicate : room
+{
+    room *duplicate() const override { return new room_impl(); }
+};
+
+struct herbalist : room_duplicate<herbalist>
 {
     str name() const override { return "Herbalist"; }
     enum { activates };
@@ -214,7 +227,7 @@ struct herbalist : room
     void draw_info(ui &o) const override;
 };
 
-struct seller : room
+struct seller : room_duplicate<seller>
 {
     str name() const override { return "Leftovers Salesman"; }
     enum { money_mult };
@@ -224,7 +237,7 @@ struct seller : room
     void draw_info(ui &o) const override;
 };
 
-struct mass_seller : room
+struct mass_seller : room_duplicate<mass_seller>
 {
     str name() const override { return "Mass Salesman"; }
     enum { activates, base_price };
@@ -234,7 +247,7 @@ struct mass_seller : room
     void draw_info(ui &o) const override;
 };
 
-struct splitter : room
+struct splitter : room_duplicate<splitter>
 {
     enum { max_split_count };
     str name() const override { return "Blender"; }

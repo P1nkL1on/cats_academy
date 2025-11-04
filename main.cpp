@@ -22,7 +22,7 @@ int main(int argc, char **argv)
     s.insert_room(3, new herbalist);
 
     s.insert_room(10, new splitter);
-    s.insert_room(12, new mass_seller);
+//    s.insert_room(12, new mass_seller);
 
     s.insert_room(20, new seller);
 
@@ -246,7 +246,7 @@ void room::draw(ui &o, int r) const
         }
         {
             o.begin_button(ui::mk_room_action(r, ui::room_action_sell));
-            o << "Sell";
+            o << "Sell for " << (price() * level()) << ui::gold;
             o.end_button();
             o.begin_button(ui::mk_room_action(r, ui::room_action_move_up));
             o << "Move up";
@@ -360,7 +360,7 @@ void state::draw(ui &o) const
         o << shop_[i]->name() + ", " << shop_[i]->level() << ": ";
         shop_[i]->draw_info(o);
         o << " ";
-        o.begin_button(ui::signal(42)); // TODO: make it realy buyable
+        o.begin_button(ui::mk_room_buy(i));
         o << "Buy for " << shop_[i]->price() << ui::gold;
         o.end_button();
         o.end_room();
@@ -415,6 +415,13 @@ bool state::btn(ui::signal s)
             draw(*ui_);
         return ok;
     }
+    if (ui::rd_room_buy(s, u)) {
+        bool ok = buy_room(u);
+        if (ok && ui_)
+            draw(*ui_);
+        return ok;
+    }
+
     return false;
 }
 
@@ -444,8 +451,30 @@ bool state::sell_room(int r)
 {
     if (r < 0 || r >= rooms_.size())
         return false;
+    inc_gold(rooms_[r]->price() * rooms_[r]->level());
     rooms_.removeAt(r);
-    // TODO: give player some money for it
+    return true;
+}
+
+bool state::buy_room(int u)
+{
+    if (u < 0 || u >= shop_.size())
+        return false;
+
+    const shared<room> &buying = shop_.at(u);
+    if (!inc_gold(-buying->price()))
+        return false;
+
+    // place the room next to rooms with the same name (or in the end if not possible)
+    int i = rooms_.size();
+    while (i > 0) {
+        if (rooms_[i - 1]->name() == buying->name())
+            break;
+        --i;
+    }
+    if (i == 0)
+        i = rooms_.size();
+    insert_room(i, buying->duplicate());
     return true;
 }
 
@@ -479,7 +508,7 @@ bool upgrade::level_up(state &s)
 void upgrade::draw(ui &o, ui::signal s) const
 {
     o.begin_upgrade();
-    o << description << " (lvl " << level_;
+    o << description << " (Lvl " << level_;
     if (level_max_ > 0)
         o << "/" << level_max_;
     o << "): ";
@@ -491,7 +520,7 @@ void upgrade::draw(ui &o, ui::signal s) const
     if (level_max_ == -1 || level_ < level_max_) {
         o << " ";
         o.begin_button(s);
-        o << "upgrade for " << price() << ui::gold;
+        o << "Upgrade for " << price() << ui::gold;
         o.end_button();
     }
     o.end_upgrade();
@@ -738,6 +767,13 @@ ui::signal ui::mk_room_upgrade(int r, int u)
     return mk_signal(r, u + max_room_upgrades);
 }
 
+ui::signal ui::mk_room_buy(int s)
+{
+    signal r = signal(room_buy_first + s);
+    assert(r <= room_buy_last);
+    return r;
+}
+
 bool ui::rd_signal(signal s, int &r, int &u)
 {
     if (s < room_upgrade_first || s > room_upgrade_last)
@@ -765,6 +801,14 @@ bool ui::rd_room_upgrade(signal s, int &r, int &u)
     if (0 <= u && u < max_room_upgrades)
         return true;
     return false;
+}
+
+bool ui::rd_room_buy(signal s, int &b)
+{
+    if (s < room_buy_first || s > room_buy_last)
+        return false;
+    b = (s - room_buy_first);
+    return true;
 }
 
 }
