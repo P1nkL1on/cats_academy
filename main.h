@@ -67,6 +67,7 @@ struct ui
         next_roll = 10000,
         next_roll_10,
         next_roll_100,
+        restart,
 
         room_upgrade_first = 20000,
         max_rooms = 100,
@@ -138,6 +139,8 @@ private:
     list<shared<room>> shop_;
     int gold_ = 0;
     std::mt19937 rng_;
+    enum { gaming, lost_by_debt } state_ = gaming;
+    friend struct debt_collector;
 };
 
 struct growing_number
@@ -146,7 +149,7 @@ struct growing_number
     virtual double next(double) const = 0;
 };
 
-struct  upgrade
+struct upgrade
 {
     upgrade() = default;
     upgrade(double v, growing_number *vadd,

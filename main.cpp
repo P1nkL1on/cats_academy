@@ -16,16 +16,6 @@ int main(int argc, char **argv)
     state s;
     s.reset();
 
-    s.insert_room(0, new herbalist);
-    s.insert_room(1, new herbalist);
-    s.insert_room(2, new herbalist);
-    s.insert_room(3, new herbalist);
-
-    s.insert_room(10, new splitter);
-//    s.insert_room(12, new mass_seller);
-
-    s.insert_room(20, new seller);
-
     QApplication app(argc, argv);
     auto *te = new QTextBrowser;
     te->setReadOnly(true);
@@ -117,6 +107,12 @@ state::state()
         shared<room>(new seller),
         shared<room>(new mass_seller),
     };
+
+    insert_room(0, new herbalist);
+    insert_room(1, new herbalist);
+    insert_room(2, new herbalist);
+    insert_room(3, new herbalist);
+    insert_room(4, new seller);
 }
 
 dice_hash state::roll_d6()
@@ -250,6 +246,8 @@ void room::draw(ui &o, int r) const
             o.end_button();
         }
         {
+            // TODO: add duplicate (for full price)
+
             o.begin_button(ui::mk_room_action(r, ui::room_action_move_up));
             o << "Move up";
             o.end_button();
@@ -281,7 +279,7 @@ void room::add_upgrade(int i, upgrade u)
 
 void state::next_roll()
 {
-    if (!rooms_.size())
+    if (state_ != gaming)
         return;
 
     for (;;) {
@@ -294,7 +292,7 @@ void state::next_roll()
         if (ui_)
             draw(*ui_);
     }
-    for (const shared<room> &r : rooms_)
+    for (const shared<room> &r : qAsConst(rooms_))
         r->activates_ = 0;
 
     rolls++;
@@ -311,20 +309,33 @@ void state::next_roll()
     default:
         break;
     }
-
-    if (ui_)
-        draw(*ui_);
 }
 
 void state::reset()
 {
     auto rng = rng_;
+    auto *ui = ui_;
     *this = state{};
     swap(rng, rng_);
+    swap(ui, ui_);
 }
 
 void state::draw(ui &o) const
 {
+    if (state_ != gaming) {
+        o.begin_paragraph();
+        switch (state_) {
+        case lost_by_debt:
+            o << "Game Over: multiple debts at once";
+            break;
+        default:
+            break;
+        }
+        o.begin_button(ui::restart);
+        o << "Restart";
+        o.end_button();
+        o.end_paragraph();
+    }
     o.begin_paragraph();
     o << "Gold: " << gold() << ui::gold;
     o << " Rolls: " << rolls;
@@ -340,6 +351,9 @@ void state::draw(ui &o) const
         o << " ";
         o.begin_button(ui::next_roll_100);
         o << "x100";
+        o.end_button();
+        o.begin_button(ui::restart);
+        o << "Restart";
         o.end_button();
     }
     o.end_paragraph();
@@ -387,6 +401,17 @@ void state::draw(ui &o) const
 
 bool state::btn(ui::signal s)
 {
+    struct update_on_exit
+    {
+        ~update_on_exit() { if (ui_) s_->draw(*ui_); }
+        state *s_ = nullptr;
+        ui *ui_ = nullptr;
+    } exit { this, ui_ };
+
+    if (s == ui::restart) {
+        reset();
+        return true;
+    }
     if (s == ui::next_roll) {
         next_roll();
         return true;
@@ -408,10 +433,7 @@ bool state::btn(ui::signal s)
     int r, u;
     if (ui::rd_room_upgrade(s, r, u)) {
         const shared<room> &room = rooms_[r];
-        const bool ok = room && room->level_up_upgrade(u, *this);
-        if (ok && ui_)
-            draw(*ui_);
-        return ok;
+        return room && room->level_up_upgrade(u, *this);
     }
     if (ui::rd_room_action(s, r, u)) {
         bool ok = false;
@@ -429,16 +451,10 @@ bool state::btn(ui::signal s)
             assert(false && "unreachable");
             break;
         }
-        if (ok && ui_)
-            draw(*ui_);
         return ok;
     }
-    if (ui::rd_room_buy(s, u)) {
-        bool ok = buy_room(u);
-        if (ok && ui_)
-            draw(*ui_);
-        return ok;
-    }
+    if (ui::rd_room_buy(s, u))
+        return buy_room(u);
 
     return false;
 }
@@ -762,8 +778,10 @@ int mass_seller::activates_max_() const
 
 void mass_seller::draw_info(ui &o) const
 {
-    o << "sells a D6 for " << upgrade_value_multiplier(base_price) <<
-         " + *" << activates_ << "* gold (each activation during roll increases cost by 1)";
+    o << "sells a D6 for " << upgrade_value_multiplier(base_price);
+    if (activates_)
+        o << " + *" << activates_ << "*";
+    o << " gold (each activation during roll increases cost by 1)";
 }
 
 ui::signal ui::mk_signal(int r, int u)
@@ -849,6 +867,16 @@ bool debt_collector::activate_(state &s)
 {
     if (!waits_gold_)
         return false;
+
+    bool have_multiple_debts_at_once =
+            1 < count_if(s.rooms_.begin(), s.rooms_.end(), [](shared<room> r) {
+                auto *debt = dynamic_cast<debt_collector *>(r.get());
+                return debt && debt->waits_gold_ > 0;
+            });
+    if (have_multiple_debts_at_once) {
+        s.state_ = state::lost_by_debt;
+        return true;
+    }
 
     int can_take_per_time = upgrade_value_multiplier(total_take_percent, waits_gold_total_);
     int can_take = min(s.gold(), min(waits_gold_, can_take_per_time));
