@@ -1,313 +1,154 @@
-#include "main.h"
-
+#include <main.h>
 #include <cassert>
+#include <algorithm>
 #include <iostream>
 
+using namespace std;
 
 int main()
 {
-    std::cout << "Hi, im Biggo, the cat's magician!\n";
+    using namespace ca;
+    state s;
+    s.reset();
 
-    world_generic w;
+    s.set_room(0, 0, new herbalist);
+    s.set_room(0, 1, new herbalist);
+    s.set_room(0, 2, new herbalist);
 
+    s.set_room(10, 0, new seller);
+    s.set_room(10, 1, new seller);
+    s.set_room(10, 2, new seller);
+
+    while(s.rolls < 10) {
+        s.next_roll();
+        cout << "turn [" << s.rolls << "], gold = " << s.gold << '\n';
+    }
     return 0;
 }
 
-world_generic::world_generic()
+namespace ca {
+
+dice::dice(dice_hash dh) : dh_(dh)
 {
-    add_money(nullptr, 1000);
-
-    add_cat(new cat);
-    add_cat(new cat);
-    add_cat(new cat);
-    add_cat(new cat);
-
-    add_room(new room_recruit_service);
-    add_room(new room_dungeon_search_bureau);
-    add_room(new room_dungeon_explorers_base);
-
-    set_cat_room(_cats[0], _rooms[0]);
-    set_cat_room(_cats[1], _rooms[0]);
-    set_cat_room(_cats[2], _rooms[1]);
-    set_cat_room(_cats[3], _rooms[1]);
-
-    add_room_exit(_rooms[0], _rooms[0]);
-    add_room_exit(_rooms[0], _rooms[1]);
-    add_room_exit(_rooms[0], _rooms[2]);
-
-    add_land(new land_generic);
-    add_land(new land_generic);
-
-    add_dungeon(new dungeon_generic(_lands[0]));
-    add_dungeon(new dungeon_generic(_lands[1]));
-    add_dungeon(new dungeon_generic(_lands[1]));
+    assert(dh != dh_invalid);
 }
 
-world_generic::~world_generic()
+dice_type dice::type() const
 {
-    for (cat *i : _cats)
-        delete i;
-    for (room *i : _rooms)
-        delete i;
-    for (dungeon *i : _dungeons)
-        delete i;
-    for (land *i : _lands)
-        delete i;
+    if (dh_d6_first <= dh_ && dh_ <= dh_d6_last)
+        return dt_d6;
+    return dt_invalid;
 }
 
-void world_generic::skip_days() const
+int dice::value() const
 {
-
+    switch (type()) {
+    case dt_d6:
+        return dh_ - dh_d6_first + 1;
+    case dt_invalid:
+        break;
+    }
+    return dh_invalid;
 }
 
-cat *world_generic::cat_in_room(int who) const
+bool herbalist::activate_(state &s)
 {
-
+    s.inc_dice(s.roll_d6(), 1);
+    return true;
 }
 
-void world_generic::cat_exits_room(cat *c)
+dice_hash state::roll_d6()
 {
-
+    return dice_hash(rng_.bounded(dh_d6_first, dh_d6_last));
 }
 
-cats_party *world_generic::cats_in_room() const
+bool state::inc_dice(dice_hash dh, int added)
 {
+    assert(added);
+    int &stored = dice_count_[dh];
+    if (added < 0 && -added > stored)
+        return false;
 
+    stored += added;
+    return true;
 }
 
-bool world_generic::cat_task(int days, cat *c, spec, room_status s)
+dice_hash state::has_dice(dice::filter f, int count) const
 {
-    assert(c && "real cat, pls");
-    wait_days(days);
-    set_cat_room();
-}
-
-void world_generic::wait_days(int x)
-{
-    assert(x >= 0 && "non-negative only");
-    current_room._days_passed += x;
-}
-
-void world_generic::cooldown_days(int)
-{
-
-}
-
-dungeon *world_generic::random_unfound_dungeon()
-{
-
-}
-
-dungeon *world_generic::selected_dungeon()
-{
-
-}
-
-void world_generic::dungeon_found(cat *, dungeon *)
-{
-
-}
-
-void world_generic::lost_on_a_road(cat *, land *)
-{
-
-}
-
-bool world_generic::spend_money(cat *, int)
-{
-
-}
-
-void world_generic::add_money(cat *, int)
-{
-
-}
-
-void world_generic::fail_dungeon_found(cat *, dungeon *)
-{
-
-}
-
-void world_generic::fail_spend_money(cat *)
-{
-
-}
-
-void world_generic::fail_recruit(cat *)
-{
-
-}
-
-cat *world_generic::generate_recruit()
-{
-
-}
-
-land *world_generic::location() const
-{
-
-}
-
-int world_generic::random_number(int min, int max) const
-{
-
-}
-
-void world_generic::add_cat(cat *c)
-{
-    _cats.push_back(c);
-    _cat_info[c] = {};
-}
-
-void world_generic::set_cat_room(cat *c, room *r)
-{
-    assert(c && "real cat, pls");
-    _cat_info[c].in = r;
-}
-
-room *world_generic::cats_room(cat *c) const
-{
-    assert(c && "real cat, pls");
-}
-
-void world_generic::add_room(room *r)
-{
-    _rooms.push_back(r);
-    _room_infos[r] = {};
-}
-
-void world_generic::add_room_exit(room *exits_from, room *exits_to)
-{
-    assert(exits_from && exits_to && "no null");
-    _room_infos[exits_from].exits.push_back(exits_to);
-}
-
-void world_generic::set_room_status(room *r, room_status s)
-{
-    _room_infos[r].status = s;
-}
-
-void world_generic::add_land(land *l)
-{
-    _lands.push_back(l);
-}
-
-void world_generic::add_dungeon(dungeon *d)
-{
-    _dungeons.push_back(d);
-}
-
-void room_dungeon_explorers_base::run(room_ctx &ctx)
-{
-    dungeon *d = ctx.selected_dungeon();
-    cats_party *c = ctx.cats_in_room();
-
-    int expected_time = d->level() * DAY;
-    int travel_cost = d->location()->travel_cost(c->count(), d->days_to_travel());
-    int living_cost = d->location()->living_cost(c->count(), expected_time);
-    if (!ctx.spend_money(c, travel_cost * 2 + living_cost))
-        return ctx.fail_spend_money(c);
-
-    if (!ctx.cat_task(d->days_to_travel(), c, TRAVELER, DEB_TRAVEL))
-        return ctx.lost_on_a_road(c, d->location());
-    int money = 0;
-    for (int i = 0; i < d->level(); ++i) {
-        if (ctx.cat_task(DAY, c, DUNGEON_EXPORER, DEB_DUNGEONEERING)) {
-            money += d->random_treasure();
+    assert(count >= 1);
+    assert(f);
+    for (auto i = dice_count_.begin(); i != dice_count_.end(); ++i) {
+        const int d_count = i.value();
+        if (d_count < count)
             continue;
-        }
-        if (ctx.cat_task(0, c, DUNGEON_FIGHTER, DEB_FIGHTING)) {
-            money += d->random_loot();
+        const dice_hash dh = i.key();
+        if (!f(dh))
             continue;
+        return dh;
+    }
+    return dh_invalid;
+}
+
+void state::set_room(int x, int y, room *r)
+{
+    assert(r);
+    delete rooms_[x][y];
+    rooms_[x][y] = r;
+}
+
+bool seller::activate_(state &s)
+{
+    const dice_hash dh = s.has_dice(dice::filter_any);
+    if (!dh)
+        return false;
+
+    s.inc_dice(dh, -1);
+    s.gold += dice(dh).value();
+    return true;
+}
+
+bool room::activate(state &s)
+{
+    if (activates_ >= activates_max_())
+        return false;
+    if (!activate_(s))
+        return false;
+    activates_++;
+    return true;
+}
+
+void state::next_roll()
+{
+    const list<int> xs = rooms_.keys();
+
+    for (int x : xs) {
+        const list<room *> rooms = rooms_[x].values();
+        if (!rooms.size())
+            continue;
+
+        for (;;) {
+            const bool used = any_of(
+                rooms.begin(), rooms.end(),
+                [this](room *r){ return r->activate(*this); });
+
+            if (!used)
+                break;
         }
-        // TODO: add cat harmed by monsters
     }
-    if (!ctx.cat_task(d->days_to_travel(), c, TRAVELER, DEB_RETURNING))
-        return ctx.lost_on_a_road(c, ctx.location());
-    ctx.add_money(c, money);
+
+    for (const auto &ys : qAsConst(rooms_))
+        for (room *r : ys)
+            r->activates_ = 0;
+
+    rolls++;
 }
 
-void room_dungeon_search_bureau::run(room_ctx &ctx)
+void state::reset()
 {
-    dungeon *d = ctx.random_unfound_dungeon();
-    cats_party *c = ctx.cats_in_room();
+    for (const auto &r : qAsConst(rooms_))
+        qDeleteAll(r);
 
-    int travel_cost = d->location()->travel_cost(c->count(), d->days_to_travel());
-    int explore_cost = d->location()->exploring_cost(c->count(), d->level() * MONTH);
-    if (!ctx.spend_money(c, travel_cost * 2 + explore_cost))
-        return ctx.fail_spend_money(c);
-
-    if (!ctx.cat_task(d->days_to_travel(), c, TRAVELER, DSB_TRAVEL))
-        return ctx.lost_on_a_road(c, d->location());
-    for (int i = 0; i < d->level(); ++i) {
-        if (!ctx.cat_task(MONTH, c, DUNGEON_EXPORER, DSB_GOING_DEEPER))
-            return ctx.fail_dungeon_found(c, d);
-    }
-    if (!ctx.cat_task(d->days_to_travel(), c, TRAVELER, DSB_RETURNING))
-        return ctx.lost_on_a_road(c, ctx.location());
-    ctx.dungeon_found(c, d);
+    *this = state{};
 }
 
-void room_recruit_service::run(room_ctx &ctx)
-{
-    cats_party *c = ctx.cats_in_room();
-    int cost = ctx.location()->exploring_cost(c->count(), WEEK);
-    if (!ctx.spend_money(c, cost))
-        return ctx.fail_spend_money(c);
-
-    if (!ctx.cat_task(WEEK, c, CITY_EXPLORER, RS_SEARCHING))
-        return ctx.fail_recruit(c);
-
-    int found = ctx.random_number(1, 6);
-    int hired = 0;
-    for (int i = 0; i < found; ++i) {
-        if (ctx.cat_task(DAY, c, RECRUITER, RS_HIRING)) {
-            ctx.cat_exits_room(ctx.generate_recruit());
-            ++hired;
-        }
-    }
-    if (!hired)
-        return ctx.fail_recruit(c);
-}
-
-int land_generic::travel_cost(int cats, int days) const
-{
-    return cats * days * 2;
-}
-
-int land_generic::exploring_cost(int cats, int days) const
-{
-    return cats * days * 5;
-}
-
-int land_generic::living_cost(int cats, int days) const
-{
-    return cats * days;
-}
-
-int dungeon_generic::level() const
-{
-    return 5;
-}
-
-int dungeon_generic::days_to_travel() const
-{
-    return WEEK;
-}
-
-land *dungeon_generic::location() const
-{
-    return _l;
-}
-
-int dungeon_generic::random_treasure()
-{
-    int money = std::min(_money, 500);
-    _money -= money;
-    return money;
-}
-
-int dungeon_generic::random_loot()
-{
-    return 10;
 }
