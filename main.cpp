@@ -21,6 +21,10 @@ int main(int argc, char **argv)
     s.set_room(0, 2, new herbalist);
     s.set_room(0, 3, new herbalist);
 
+//    s.set_room(4, 0, new splitter);
+//    s.set_room(6, 0, new splitter);
+//    s.set_room(9, 0, new mass_seller);
+
     s.set_room(10, 0, new seller);
 
     QApplication app(argc, argv);
@@ -41,7 +45,7 @@ int main(int argc, char **argv)
         else if (btn == "next_roll_100")
             u.set_flush_delay(2);
         const bool ok = s.btn(btn);
-        cout << "> button pressed '" << btn << "': " << (ok ? "OK" : "ignored") << '\n';
+        cout << "> button pressed '" << btn << "': " << (ok ? "OK" : "ignored") << "\n";
         cout.flush();
         if (!ok)
             s.draw(u); // since invalid link makes a QTextBrowser empty
@@ -101,7 +105,8 @@ void herbalist::draw_info_(ui &o) const
 
 dice_hash state::roll_d6()
 {
-    return dice_hash(rng_.bounded(dh_d6_first, dh_d6_last));
+    std::uniform_int_distribution<int> roll(dh_d6_first, dh_d6_last);
+    return dice_hash(roll(rng_));
 }
 
 bool state::inc_dice(dice_hash dh, int added)
@@ -278,7 +283,9 @@ void state::next_roll()
 
 void state::reset()
 {
+    auto rng = rng_;
     *this = state{};
+    swap(rng, rng_);
 }
 
 void state::draw(ui &o) const
@@ -293,11 +300,11 @@ void state::draw(ui &o) const
         o.end_button();
         o << " ";
         o.begin_button("next_roll_10");
-        o << "Next 10 rolls";
+        o << "x10";
         o.end_button();
         o << " ";
         o.begin_button("next_roll_100");
-        o << "Next 100 rolls";
+        o << "x100";
         o.end_button();
     }
     o.end_paragraph();
@@ -310,7 +317,7 @@ void state::draw(ui &o) const
         while (count--) {
             switch (dice(dh).type()) {
             case dt_d6:
-                o << ui::symbol(ui::d6_first + dice(dh).value());
+                o << ui::symbol(ui::d6_first + dice(dh).value() - 1);
                 break;
             default:
                 o << ui::undefined;
@@ -380,9 +387,9 @@ bool upgrade::level_up(state &s)
 void upgrade::draw(ui &o) const
 {
     o.begin_upgrade();
-    o << description << " (lvl " << level_ ;
+    o << description << " (lvl " << level_;
     if (level_max_ > 0)
-        o << '/' << level_max_;
+        o << "/" << level_max_;
     o << "): " << value() << " -> " << value_next();
 
     if (level_max_ == -1 || level_ < level_max_) {
@@ -425,7 +432,7 @@ ui &ui_cmd::operator <<(str s)
 ui &ui_cmd::operator <<(symbol s)
 {
     if (s == gold)
-        o << "[$]";
+        o << "$";
     else if (d6_first <= s && s <= d6_last)
         o << "[" << (s - d6_first + 1) << "]";
     else
@@ -515,7 +522,7 @@ void ui_cmd::push_scope(scope s)
     scopes_stack_.push_back(s);
     for (int i = 0; i < scopes_stack_.size(); ++i)
         o << "  ";
-    o << '<' << scope_str(s) << ">";
+    o << "<" << scope_str(s) << ">";
 }
 
 void ui_cmd::pop_scope(scope s)
@@ -545,6 +552,58 @@ void ui_QTextEdit::set_flush_delay(int ms)
 {
     assert(ms >= 0);
     delay_ms_ = ms;
+}
+
+bool splitter::activate_(state &s)
+{
+    const dice_hash dh = s.has_dice(dice::mk_filter_value_grt(1));
+    if (!dh)
+        return false;
+
+    s.inc_dice(dh, -1);
+    s.inc_dice(dh_d6_first, dice(dh).value());
+    return true;
+}
+
+void splitter::draw_info_(ui &o) const
+{
+    o << "splits a D6 with 2+ into multiple D6's with value 1";
+}
+
+mass_seller::mass_seller()
+{
+    add_upgrade(activates, upgrade(
+                    4, new linear_growing_number(1),
+                    10, new multiply_growing_number(1.5),
+                    16, "Number of activations"
+                ));
+    add_upgrade(base_price, upgrade(
+                    1, new linear_growing_number(1),
+                    100, new multiply_growing_number(1.5),
+                    -1, "Base price"
+                ));
+}
+
+bool mass_seller::activate_(state &s)
+{
+    const dice_hash dh = s.has_dice(dice::filter_any);
+    if (!dh)
+        return false;
+
+    s.inc_dice(dh, -1);
+    s.inc_gold(upgrade_value_multiplier(base_price) + activates_);
+    return true;
+}
+
+int mass_seller::activates_max_() const
+{
+    return upgrade_value_floor(activates);
+}
+
+void mass_seller::draw_info_(ui &o) const
+{
+    o << "sells a D6 for " << upgrade_value_multiplier(base_price) <<
+         " + *" << activates_ << "* gold (each activation during roll increases cost by 1)";
 }
 
 }

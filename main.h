@@ -1,8 +1,8 @@
 #include <QMap>
-#include <QRandomGenerator>
 #include <QTextBrowser>
 
 #include <functional>
+#include <random>
 #include <memory>
 #include <string>
 #include <iostream>
@@ -17,7 +17,6 @@ template<typename t> using shared = std::shared_ptr<t>;
 using str = std::string;
 using out = std::ostream;
 using strout = std::stringstream;
-using random = QRandomGenerator;
 
 enum dice_type
 {
@@ -29,8 +28,14 @@ enum dice_hash
 {
     dh_invalid = 0,
     dh_d6 = dt_d6,
-    dh_d6_first = dt_d6 + 1,
-    dh_d6_last = dt_d6 + 6,
+    dh_d6_1,
+    dh_d6_2,
+    dh_d6_3,
+    dh_d6_4,
+    dh_d6_5,
+    dh_d6_6,
+    dh_d6_first = dh_d6_1,
+    dh_d6_last = dh_d6_6,
 };
 
 struct dice
@@ -41,6 +46,7 @@ struct dice
 
     using filter = std::function<bool(dice)>;
     static bool filter_any(dice) { return true; }
+    static filter mk_filter_value_grt(int x) { return [x](dice d){ return d.value() > x; }; }
 private:
     dice_hash dh_ = dh_invalid;
 };
@@ -97,7 +103,7 @@ private:
     map<dice_hash, int> dice_count_;
     map<int, map<int, shared<room>>> rooms_;
     int gold_ = 0;
-    random rng_;
+    std::mt19937 rng_;
 };
 
 struct growing_number
@@ -106,7 +112,7 @@ struct growing_number
     virtual double next(double) const = 0;
 };
 
-struct upgrade
+struct  upgrade
 {
     upgrade() = default;
     upgrade(double v, growing_number *vadd,
@@ -144,7 +150,7 @@ protected:
     void add_upgrade(int, upgrade);
     int upgrade_value_ceil(int u) const { return upgrades_[u].value_ceil(); }
     int upgrade_value_floor(int u) const { return upgrades_[u].value_floor(); }
-    int upgrade_value_multiplier(int u, int x) const { return floor(upgrades_[u].value() * x); }
+    int upgrade_value_multiplier(int u, int x = 1) const { return floor(upgrades_[u].value() * x); }
 private:
     map<int, upgrade> upgrades_;
 };
@@ -184,6 +190,23 @@ struct seller : room
     seller();
     bool activate_(state &s) override;
     int activates_max_() const override;
+    void draw_info_(ui &o) const override;
+};
+
+struct mass_seller : room
+{
+    str name_() const override { return "Mass Salesman"; }
+    enum { activates, base_price };
+    mass_seller();
+    bool activate_(state &s) override;
+    int activates_max_() const override;
+    void draw_info_(ui &o) const override;
+};
+
+struct splitter : room
+{
+    str name_() const override { return "Blender"; }
+    bool activate_(state &s) override;
     void draw_info_(ui &o) const override;
 };
 
