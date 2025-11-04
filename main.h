@@ -45,8 +45,8 @@ struct dice
     int value() const;
 
     using filter = std::function<bool(dice)>;
+    using comparer = std::function<bool(dice, dice)>;
     static bool filter_any(dice) { return true; }
-    static filter mk_filter_value_grt(int x) { return [x](dice d){ return d.value() > x; }; }
 private:
     dice_hash dh_ = dh_invalid;
 };
@@ -68,25 +68,22 @@ struct ui
         next_roll_10,
         next_roll_100,
 
-        max_room_x = 10,
-        max_room_y = 10,
+        max_rooms = 100,
         max_room_actions = 900,
         max_room_upgrades = 100,
         max_room_signals = max_room_actions + max_room_upgrades,
         room_upgrade_first = 20000,
-        room_upgrade_last  = room_upgrade_first + max_room_x * max_room_y * max_room_signals - 1,
+        room_upgrade_last  = room_upgrade_first + max_rooms * max_room_signals - 1,
         room_action_sell = 1,
-        room_action_move_left,
-        room_action_move_right,
         room_action_move_up,
         room_action_move_down,
     };
-    static signal mk_signal(int x, int y, int u);
-    static signal mk_room_action(int x, int y, int u);
-    static signal mk_room_upgrade(int x, int y, int u);
-    static bool rd_signal(signal, int &x, int &y, int &u);
-    static bool rd_room_action(signal, int &x, int &y, int &u);
-    static bool rd_room_upgrade(signal, int &x, int &y, int &u);
+    static signal mk_signal(int r, int u);
+    static signal mk_room_action(int r, int u);
+    static signal mk_room_upgrade(int r , int u);
+    static bool rd_signal(signal, int &r, int &u);
+    static bool rd_room_action(signal, int &r, int &u);
+    static bool rd_room_upgrade(signal, int &r, int &u);
 
     virtual ~ui() = default;
     virtual ui &operator<<(int) = 0;
@@ -109,14 +106,15 @@ struct ui
 
 struct state
 {
+    state();
     ui *ui_ = nullptr;
     int rolls = 0;
 
     dice_hash roll_d6();
     bool inc_dice(dice_hash, int added = 1);
     bool inc_gold(int added);
-    dice_hash has_dice(dice::filter, int count = 1) const;
-    void set_room(int x, int y, room *);
+    dice_hash has_dice(dice::filter, int count = 1, dice::comparer = nullptr) const;
+    void insert_room(int r, room *);
 
     void next_roll();
     void reset();
@@ -124,12 +122,13 @@ struct state
     int gold() const { return gold_; }
     void draw(ui &) const;
     bool btn(ui::signal);
-    bool move_room(int x, int y, int xmod, int ymod);
-    bool sell_room(int x, int y);
+    bool move_room(int r, int mod);
+    bool sell_room(int r);
 
 private:
     map<dice_hash, int> dice_count_;
-    map<int, map<int, shared<room>>> rooms_;
+    list<shared<room>> rooms_;
+    list<shared<room>> shop_;
     int gold_ = 0;
     std::mt19937 rng_;
 };
@@ -151,6 +150,7 @@ struct  upgrade
     int value_floor() const { return floor(value_); }
     double value() const { return value_; }
     void draw(ui &, ui::signal) const;
+    int level() const { return level_; }
     str description;
 private:
     double value_next() const;
@@ -160,7 +160,7 @@ private:
     double price_ = 0;
     shared<growing_number> price_grow = nullptr;
     int level_max_ = -1;
-    int level_ = 1;
+    int level_ = 0;
 };
 
 struct room
@@ -170,12 +170,14 @@ struct room
     int activates_ = 0;
     int upgrade_count() const { return upgrades_.size(); }
     bool level_up_upgrade(int u, state &s);
-    void draw(ui &, int x, int y) const;
+    void draw(ui &, int r) const;
+    int level() const;
+    virtual void draw_info(ui &) const {}
+    virtual str name() const { return "Room"; }
+    virtual int price() const { return 100; }
 protected:
     virtual bool activate_(state &) { return false; }
     virtual int activates_max_() const { return 1; }
-    virtual str name_() const { return "Room"; }
-    virtual void draw_info_(ui &) const {}
     void add_upgrade(int, upgrade);
     int upgrade_value_ceil(int u) const { return upgrades_[u].value_ceil(); }
     int upgrade_value_floor(int u) const { return upgrades_[u].value_floor(); }
@@ -204,39 +206,41 @@ private:
 
 struct herbalist : room
 {
-    str name_() const override { return "Herbalist"; }
+    str name() const override { return "Herbalist"; }
     enum { activates };
     herbalist();
     bool activate_(state &s) override;
     int activates_max_() const override;
-    void draw_info_(ui &o) const override;
+    void draw_info(ui &o) const override;
 };
 
 struct seller : room
 {
-    str name_() const override { return "Leftovers Salesman"; }
+    str name() const override { return "Leftovers Salesman"; }
     enum { money_mult };
     seller();
     bool activate_(state &s) override;
     int activates_max_() const override;
-    void draw_info_(ui &o) const override;
+    void draw_info(ui &o) const override;
 };
 
 struct mass_seller : room
 {
-    str name_() const override { return "Mass Salesman"; }
+    str name() const override { return "Mass Salesman"; }
     enum { activates, base_price };
     mass_seller();
     bool activate_(state &s) override;
     int activates_max_() const override;
-    void draw_info_(ui &o) const override;
+    void draw_info(ui &o) const override;
 };
 
 struct splitter : room
 {
-    str name_() const override { return "Blender"; }
+    enum { max_split_count };
+    str name() const override { return "Blender"; }
+    splitter();
     bool activate_(state &s) override;
-    void draw_info_(ui &o) const override;
+    void draw_info(ui &o) const override;
 };
 
 struct ui_cmd : ui

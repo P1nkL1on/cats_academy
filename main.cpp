@@ -16,15 +16,15 @@ int main(int argc, char **argv)
     state s;
     s.reset();
 
-    s.set_room(0, 0, new herbalist);
-    s.set_room(0, 1, new herbalist);
-    s.set_room(0, 2, new herbalist);
-    s.set_room(0, 3, new herbalist);
+    s.insert_room(0, new herbalist);
+    s.insert_room(1, new herbalist);
+    s.insert_room(2, new herbalist);
+    s.insert_room(3, new herbalist);
 
-    s.set_room(1, 0, new splitter);
-    s.set_room(2, 0, new mass_seller);
+    s.insert_room(10, new splitter);
+    s.insert_room(12, new mass_seller);
 
-    s.set_room(3, 0, new seller);
+    s.insert_room(20, new seller);
 
     QApplication app(argc, argv);
     auto *te = new QTextBrowser;
@@ -89,7 +89,7 @@ herbalist::herbalist()
     add_upgrade(activates, upgrade(
                     1, new linear_growing_number(1),
                     200, new multiply_growing_number(1.5),
-                    -1, "Number of activations"
+                    8, "Number of activations"
                 ));
 }
 
@@ -104,9 +104,19 @@ int herbalist::activates_max_() const
     return upgrade_value_floor(activates);
 }
 
-void herbalist::draw_info_(ui &o) const
+void herbalist::draw_info(ui &o) const
 {
     o << "generates a D6";
+}
+
+state::state()
+{
+    shop_ = {
+        shared<room>(new herbalist),
+        shared<room>(new splitter),
+        shared<room>(new seller),
+        shared<room>(new mass_seller),
+    };
 }
 
 dice_hash state::roll_d6()
@@ -136,10 +146,11 @@ bool state::inc_gold(int added)
     return true;
 }
 
-dice_hash state::has_dice(dice::filter f, int count) const
+dice_hash state::has_dice(dice::filter f, int count, dice::comparer c) const
 {
     assert(count >= 1);
     assert(f);
+    dice_hash best = dh_invalid;
     for (auto i = dice_count_.begin(); i != dice_count_.end(); ++i) {
         const int d_count = i.value();
         if (d_count < count)
@@ -147,23 +158,26 @@ dice_hash state::has_dice(dice::filter f, int count) const
         const dice_hash dh = i.key();
         if (!f(dh))
             continue;
-        return dh;
+        if (!c)
+            return dh;
+        if (best == dh_invalid || c(dh, best))
+            best = dh;
     }
-    return dh_invalid;
+    return best;
 }
 
-void state::set_room(int x, int y, room *r)
+void state::insert_room(int pos, room *r)
 {
     assert(r);
-    rooms_[x][y].reset(r);
+    rooms_.insert(pos, shared<room>(r));
 }
 
 seller::seller()
 {
     add_upgrade(money_mult, upgrade(
-                    1, new linear_growing_number(0.01),
-                    10, new multiply_growing_number(1.5),
-                    -1, "Gold output multiplier"
+                    1, new linear_growing_number(0.1),
+                    100, new multiply_growing_number(1.5),
+                    10, "Gold output multiplier"
                 ));
 }
 
@@ -183,7 +197,7 @@ int seller::activates_max_() const
     return -1;
 }
 
-void seller::draw_info_(ui &o) const
+void seller::draw_info(ui &o) const
 {
     o << "sells any dice for it's value in gold";
 }
@@ -203,14 +217,15 @@ bool room::level_up_upgrade(int u, state &s)
     return upgrades_[u].level_up(s);
 }
 
-void room::draw(ui &o, int x, int y) const
+void room::draw(ui &o, int r) const
 {
     o.begin_room();
     {
         o.begin_paragraph();
         {
-            o << name_() << ": ";
-            draw_info_(o);
+            o << name() << ", " << level();
+            o << ": ";
+            draw_info(o);
 
             if (activates_max_() != -1) {
                 const int left = activates_max_() - activates_;
@@ -230,29 +245,31 @@ void room::draw(ui &o, int x, int y) const
             }
         }
         {
-            o.begin_button(ui::mk_room_action(x, y, ui::room_action_sell));
+            o.begin_button(ui::mk_room_action(r, ui::room_action_sell));
             o << "Sell";
             o.end_button();
-            o.begin_button(ui::mk_room_action(x, y, ui::room_action_move_up));
+            o.begin_button(ui::mk_room_action(r, ui::room_action_move_up));
             o << "Move up";
             o.end_button();
-            o.begin_button(ui::mk_room_action(x, y, ui::room_action_move_down));
+            o.begin_button(ui::mk_room_action(r, ui::room_action_move_down));
             o << "Move down";
-            o.end_button();
-            o.begin_button(ui::mk_room_action(x, y, ui::room_action_move_left));
-            o << "Move before";
-            o.end_button();
-            o.begin_button(ui::mk_room_action(x, y, ui::room_action_move_right));
-            o << "Move after";
             o.end_button();
         }
         o.end_paragraph();
         o.begin_list();
         for (auto i = upgrades_.begin(); i != upgrades_.end(); ++i)
-            i.value().draw(o, ui::mk_signal(x, y, i.key()));
+            i.value().draw(o, ui::mk_signal(r, i.key()));
         o.end_list();
     }
     o.end_room();
+}
+
+int room::level() const
+{
+    int lvl = 1;
+    for (const upgrade &u : upgrades_)
+        lvl += u.level();
+    return lvl;
 }
 
 void room::add_upgrade(int i, upgrade u)
@@ -262,28 +279,21 @@ void room::add_upgrade(int i, upgrade u)
 
 void state::next_roll()
 {
-    const list<int> xs = rooms_.keys();
+    if (!rooms_.size())
+        return;
 
-    for (int x : xs) {
-        const list<shared<room>> rooms = rooms_[x].values();
-        if (!rooms.size())
-            continue;
+    for (;;) {
+        const bool used = any_of(
+            rooms_.begin(), rooms_.end(),
+            [this](const shared<room> &r){ return r->activate(*this); });
 
-        for (;;) {
-            const bool used = any_of(
-                rooms.begin(), rooms.end(),
-                [this](const shared<room> &r){ return r->activate(*this); });
-
-            if (!used)
-                break;
-            if (ui_)
-                draw(*ui_);
-        }
+        if (!used)
+            break;
+        if (ui_)
+            draw(*ui_);
     }
-
-    for (const auto &ys : qAsConst(rooms_))
-        for (const shared<room> &r : ys)
-            r->activates_ = 0;
+    for (const shared<room> &r : rooms_)
+        r->activates_ = 0;
 
     rolls++;
     if (ui_)
@@ -338,12 +348,22 @@ void state::draw(ui &o) const
 
     o << "Rooms: ";
     o.begin_list();
-    for (auto x = rooms_.begin(); x != rooms_.end(); ++x) {
-        o << "Priority: " << x.key();
-        o.begin_list();
-        for (auto y = x.value().begin(); y != x.value().end(); ++y)
-            y.value()->draw(o, x.key(), y.key());
-        o.end_list();
+    for (int i = 0; i < rooms_.size(); ++i)
+        rooms_[i]->draw(o, i);
+
+    o.end_list();
+
+    o << "Buy new: ";
+    o.begin_list();
+    for (int i = 0; i < shop_.size(); ++i) {
+        o.begin_room();
+        o << shop_[i]->name() + ", " << shop_[i]->level() << ": ";
+        shop_[i]->draw_info(o);
+        o << " ";
+        o.begin_button(ui::signal(42)); // TODO: make it realy buyable
+        o << "Buy for " << shop_[i]->price() << ui::gold;
+        o.end_button();
+        o.end_room();
     }
     o.end_list();
     o.flush();
@@ -367,31 +387,25 @@ bool state::btn(ui::signal s)
             next_roll();
         return true;
     }
-    int x, y, u;
-    if (ui::rd_room_upgrade(s, x, y, u)) {
-        const shared<room> &r = qAsConst(rooms_)[x][y];
-        const bool ok = r && r->level_up_upgrade(u, *this);
+    int r, u;
+    if (ui::rd_room_upgrade(s, r, u)) {
+        const shared<room> &room = rooms_[r];
+        const bool ok = room && room->level_up_upgrade(u, *this);
         if (ok && ui_)
             draw(*ui_);
         return ok;
     }
-    if (ui::rd_room_action(s, x, y, u)) {
+    if (ui::rd_room_action(s, r, u)) {
         bool ok = false;
         switch (u) {
         case ui::room_action_sell:
-            ok = sell_room(x, y);
-            break;
-        case ui::room_action_move_left:
-            ok = move_room(x, y, -1, 0);
-            break;
-        case ui::room_action_move_right:
-            ok = move_room(x, y, +1, 0);
+            ok = sell_room(r);
             break;
         case ui::room_action_move_up:
-            ok = move_room(x, y, 0, -1);
+            ok = move_room(r, -1);
             break;
         case ui::room_action_move_down:
-            ok = move_room(x, y, 0, +1);
+            ok = move_room(r, +1);
             break;
         default:
             assert(false && "unreachable");
@@ -404,60 +418,33 @@ bool state::btn(ui::signal s)
     return false;
 }
 
-bool state::move_room(int x, int y, int xmod, int ymod)
+bool state::move_room(int r, int mod)
 {
-    while (xmod > 1) {
-        if (!move_room(x++, y, 1, 0))
+    while (mod > 1) {
+        if (!move_room(r++, 1))
             return false;
-        xmod--;
+        mod--;
     }
-    while (xmod < -1) {
-        if (!move_room(x--, y, -1, 0))
+    while (mod < -1) {
+        if (!move_room(r--, -1))
             return false;
-        xmod++;
+        mod++;
     }
-    while (ymod > 1) {
-        if (!move_room(x, y++, 0, 1))
-            return false;
-        ymod--;
-    }
-    while (ymod < -1) {
-        if (!move_room(x, y--, 0, -1))
-            return false;
-        ymod++;
-    }
-    assert(-1 <= xmod && xmod <= 1);
-    assert(-1 <= ymod && ymod <= 1);
-    if (!xmod && !ymod)
+    assert(-1 <= mod && mod <= 1);
+    if (!mod)
         return true;
 
-    const auto &r = qAsConst(rooms_);
-    if (ymod) {
-        if (y + ymod > r[x].lastKey() || y + ymod < r[x].firstKey())
-            return false;
-        swap(rooms_[x][y], rooms_[x][y + ymod]);
-        return true;
-    }
-    return false;
+    if (r + mod > rooms_.size() || r + mod < 0)
+        return false;
+    swap(rooms_[r], rooms_[r + mod]);
+    return true;
 }
 
-bool state::sell_room(int x, int y)
+bool state::sell_room(int r)
 {
-    if (!qAsConst(rooms_)[x][y])
+    if (r < 0 || r >= rooms_.size())
         return false;
-
-    rooms_[x].remove(y);
-    for (int i = y + 1; i < 10; ++i) {
-        if (rooms_[x].contains(i))
-            rooms_[x].insert(i - 1, rooms_[x].take(i));
-    }
-    if (rooms_[x].isEmpty()) {
-        rooms_.remove(x);
-        for (int i = x + 1; i < 10; ++i) {
-            if (rooms_.contains(i))
-                rooms_.insert(i - 1, rooms_.take(i));
-        }
-    }
+    rooms_.removeAt(r);
     // TODO: give player some money for it
     return true;
 }
@@ -469,7 +456,7 @@ upgrade::upgrade(
     description(move(description)),
     value_(v), value_grow(vadd),
     price_(p), price_grow(padd),
-    level_max_(lvl_max), level_(1)
+    level_max_(lvl_max)
 {
     assert(vadd);
     assert(padd);
@@ -495,7 +482,11 @@ void upgrade::draw(ui &o, ui::signal s) const
     o << description << " (lvl " << level_;
     if (level_max_ > 0)
         o << "/" << level_max_;
-    o << "): " << value() << " -> " << value_next();
+    o << "): ";
+    if (level_max_ != 0 && level_ < level_max_)
+        o << value() << " -> " << value_next();
+    else
+        o << "MAX";
 
     if (level_max_ == -1 || level_ < level_max_) {
         o << " ";
@@ -659,20 +650,37 @@ void ui_QTextEdit::set_flush_delay(int ms)
     delay_ms_ = ms;
 }
 
+splitter::splitter()
+{
+    add_upgrade(max_split_count, upgrade(
+                    2, new linear_growing_number(1),
+                    100, new multiply_growing_number(2),
+                    4, "Max split dice count"
+                ));
+}
+
 bool splitter::activate_(state &s)
 {
-    const dice_hash dh = s.has_dice(dice::mk_filter_value_grt(1));
+    auto greater_than_2 = [](dice d){ return d.value() > 2; };
+    auto split_count = upgrade_value_floor(max_split_count);
+    auto best_to_split = [split_count](dice my, dice best) {
+        return my.value() <= split_count && my.value() > best.value();
+    };
+
+    const dice_hash dh = s.has_dice(greater_than_2, 1, best_to_split);
     if (!dh)
         return false;
 
     s.inc_dice(dh, -1);
-    s.inc_dice(dh_d6_first, dice(dh).value());
+    s.inc_dice(dh_d6_first, min(split_count, dice(dh).value()));
     return true;
 }
 
-void splitter::draw_info_(ui &o) const
+void splitter::draw_info(ui &o) const
 {
-    o << "splits a D6 with 2+ into multiple D6's with value 1";
+    o << "splits a D6 with 2+ into up to "
+      << upgrade_value_floor(max_split_count)
+      << " D6's with value 1";
 }
 
 mass_seller::mass_seller()
@@ -680,12 +688,12 @@ mass_seller::mass_seller()
     add_upgrade(activates, upgrade(
                     4, new linear_growing_number(1),
                     10, new multiply_growing_number(1.5),
-                    16, "Number of activations"
+                    5, "Number of activations"
                 ));
     add_upgrade(base_price, upgrade(
                     1, new linear_growing_number(1),
                     100, new multiply_growing_number(1.5),
-                    -1, "Base price"
+                    5, "Base price"
                 ));
 }
 
@@ -705,47 +713,44 @@ int mass_seller::activates_max_() const
     return upgrade_value_floor(activates);
 }
 
-void mass_seller::draw_info_(ui &o) const
+void mass_seller::draw_info(ui &o) const
 {
     o << "sells a D6 for " << upgrade_value_multiplier(base_price) <<
          " + *" << activates_ << "* gold (each activation during roll increases cost by 1)";
 }
 
-ui::signal ui::mk_signal(int x, int y, int u)
+ui::signal ui::mk_signal(int r, int u)
 {
-    assert(0 <= x && x < max_room_x);
-    assert(0 <= y && y < max_room_y);
+    assert(0 <= r && r < max_rooms);
     assert(0 <= u && u < max_room_signals);
-    return signal((int)room_upgrade_first
-                  + (max_room_y * max_room_signals) * x + max_room_signals * y + u);
+    return signal((int)room_upgrade_first + max_room_signals * r + u);
 }
 
-ui::signal ui::mk_room_action(int x, int y, int u)
+ui::signal ui::mk_room_action(int r, int u)
 {
     assert(0 <= u && u < max_room_actions);
-    return mk_signal(x, y, u + max_room_upgrades);
+    return mk_signal(r, u + max_room_upgrades);
 }
 
-ui::signal ui::mk_room_upgrade(int x, int y, int u)
+ui::signal ui::mk_room_upgrade(int r, int u)
 {
     assert(0 <= u && u < max_room_upgrades);
-    return mk_signal(x, y, u + max_room_upgrades);
+    return mk_signal(r, u + max_room_upgrades);
 }
 
-bool ui::rd_signal(signal s, int &x, int &y, int &u)
+bool ui::rd_signal(signal s, int &r, int &u)
 {
     if (s < room_upgrade_first || s > room_upgrade_last)
         return false;
     const int ss = s - room_upgrade_first;
-    x = ss / (max_room_y * max_room_signals);
-    y = (ss % (max_room_y * max_room_signals)) / max_room_signals;
+    r = ss / max_room_signals;
     u = ss % max_room_signals;
     return true;
 }
 
-bool ui::rd_room_action(signal s, int &x, int &y, int &u)
+bool ui::rd_room_action(signal s, int &r, int &u)
 {
-    if (!rd_signal(s, x, y, u))
+    if (!rd_signal(s, r, u))
         return false;
     u -= max_room_upgrades;
     if (0 <= u && u < max_room_actions)
@@ -753,9 +758,9 @@ bool ui::rd_room_action(signal s, int &x, int &y, int &u)
     return false;
 }
 
-bool ui::rd_room_upgrade(signal s, int &x, int &y, int &u)
+bool ui::rd_room_upgrade(signal s, int &r, int &u)
 {
-    if (!rd_signal(s, x, y, u))
+    if (!rd_signal(s, r, u))
         return false;
     if (0 <= u && u < max_room_upgrades)
         return true;
