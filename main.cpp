@@ -106,6 +106,7 @@ state::state()
         shared<room>(new splitter),
         shared<room>(new seller),
         shared<room>(new mass_seller),
+        shared<room>(new panacea),
     };
 
     insert_room(0, new herbalist);
@@ -326,7 +327,10 @@ void state::draw(ui &o) const
         o.begin_paragraph();
         switch (state_) {
         case lost_by_debt:
-            o << "Game Over: multiple debts at once";
+            o << "Game Over: lost by multiple debts at once";
+            break;
+        case won_by_panacea:
+            o << "Game Over: won by Panacea";
             break;
         default:
             break;
@@ -902,5 +906,15 @@ int debt_collector::price() const
     return waits_gold_ ? -1 : 0;
 }
 
+bool panacea::activate_(state &s)
+{
+    s.state_ = state::won_by_panacea;
+    return true;
 }
 
+void panacea::draw_info(ui &o) const
+{
+    o << "wins you the game!";
+}
+
+}

@@ -139,8 +139,9 @@ private:
     list<shared<room>> shop_;
     int gold_ = 0;
     std::mt19937 rng_;
-    enum { gaming, lost_by_debt } state_ = gaming;
+    enum { gaming, lost_by_debt, won_by_panacea } state_ = gaming;
     friend struct debt_collector;
+    friend struct panacea;
 };
 
 struct growing_number
@@ -271,6 +272,14 @@ struct debt_collector : room_duplicate<debt_collector>
     int waits_gold_ = 0;
 private:
     int waits_gold_total_ = 0;
+};
+
+struct panacea : room_duplicate<debt_collector>
+{
+    str name() const override { return "Panacea"; }
+    bool activate_(state &s) override;
+    void draw_info(ui &o) const override;
+    int price() const override { return 20000; }
 };
 
 struct ui_cmd : ui
