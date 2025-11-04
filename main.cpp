@@ -34,6 +34,12 @@ int main(int argc, char **argv)
 
     QObject::connect(te, &QTextBrowser::anchorClicked, [&s, &u](const QUrl &url){
         const str btn = url.toString().toStdString();
+        if (btn == "next_roll")
+            u.set_flush_delay(200);
+        else if (btn == "next_roll_10")
+            u.set_flush_delay(20);
+        else if (btn == "next_roll_100")
+            u.set_flush_delay(2);
         const bool ok = s.btn(btn);
         cout << "> button pressed '" << btn << "': " << (ok ? "OK" : "ignored") << '\n';
         cout.flush();
@@ -280,10 +286,20 @@ void state::draw(ui &o) const
     o.begin_paragraph();
     o << "Gold: " << gold() << ui::gold;
     o << " Rolls: " << rolls;
-    o << " ";
-    o.begin_button("next_roll");
-    o << "Next roll";
-    o.end_button();
+    {
+        o << " ";
+        o.begin_button("next_roll");
+        o << "Next roll";
+        o.end_button();
+        o << " ";
+        o.begin_button("next_roll_10");
+        o << "Next 10 rolls";
+        o.end_button();
+        o << " ";
+        o.begin_button("next_roll_100");
+        o << "Next 100 rolls";
+        o.end_button();
+    }
     o.end_paragraph();
 
     o.begin_paragraph();
@@ -319,7 +335,18 @@ bool state::btn(str s)
         next_roll();
         return true;
     }
-
+    if (s == "next_roll_10") {
+        int count = 10;
+        while (count--)
+            next_roll();
+        return true;
+    }
+    if (s == "next_roll_100") {
+        int count = 100;
+        while (count--)
+            next_roll();
+        return true;
+    }
     return false;
 }
 
@@ -433,12 +460,12 @@ void ui_cmd::end_upgrade()
 void ui_cmd::begin_button(str s)
 {
     push_scope(scope_btn);
-    o << "<a href=\"" << s << "\">";
+    o << "<a href=\"" << s << "\">[";
 }
 
 void ui_cmd::end_button()
 {
-    o << "</a>";
+    o << "]</a>";
     pop_scope(scope_btn);
 }
 
@@ -508,9 +535,16 @@ void ui_QTextEdit::flush()
     s_.str("");
     if (te_) {
         te_->setHtml(QString::fromStdString(flushed));
-        QThread::msleep(100);
+        if (delay_ms_ > 0)
+            QThread::msleep(delay_ms_);
         QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
     }
+}
+
+void ui_QTextEdit::set_flush_delay(int ms)
+{
+    assert(ms >= 0);
+    delay_ms_ = ms;
 }
 
 }

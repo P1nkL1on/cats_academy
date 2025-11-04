@@ -218,9 +218,11 @@ struct ui_QTextEdit : ui_cmd
 {
     ui_QTextEdit(QTextBrowser *te) : ui_cmd(s_), te_(te) { assert(te); }
     void flush() override;
+    void set_flush_delay(int ms);
 private:
     strout s_;
     QTextBrowser *te_ = nullptr;
+    int delay_ms_ = 100;
 };
 
 }
