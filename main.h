@@ -1,12 +1,18 @@
 #include <QMap>
 #include <QRandomGenerator>
 #include <functional>
+#include <memory>
+#include <string>
+#include <iostream>
 
 namespace ca {
 
 template<typename k, typename v> using map = QMap<k, v>;
 template<typename t> using vector = QVector<t>;
 template<typename t> using list = QList<t>;
+template<typename t> using shared = std::shared_ptr<t>;
+using str = std::string;
+using out = std::ostream;
 using random = QRandomGenerator;
 
 enum dice_type
@@ -37,23 +43,86 @@ private:
 
 struct room;
 
+struct ui
+{
+    enum symbol
+    {
+        undefined,
+        gold,
+        d6_first,
+        d6_last = d6_first + 5,
+    };
+    virtual ~ui() = default;
+    virtual ui &operator<<(int) = 0;
+    virtual ui &operator<<(double) = 0;
+    virtual ui &operator<<(str) = 0;
+    virtual ui &operator<<(symbol) = 0;
+    virtual void flush() {}
+
+    virtual void begin_room() {}
+    virtual void end_room() {}
+
+    virtual void begin_upgrade() {}
+    virtual void end_upgrade() {}
+
+    virtual void begin_button() {}
+    virtual void end_button() {}
+
+    virtual void begin_paragraph() {}
+    virtual void end_paragraph() {}
+};
+
 struct state
 {
-    map<int, map<int, room *>> rooms_;
-    int gold = 0;
+    ui *ui_ = nullptr;
     int rolls = 0;
 
     dice_hash roll_d6();
     bool inc_dice(dice_hash, int added = 1);
+    bool inc_gold(int added);
     dice_hash has_dice(dice::filter, int count = 1) const;
     void set_room(int x, int y, room *);
 
     void next_roll();
     void reset();
 
+    int gold() const { return gold_; }
+    void draw(ui &) const;
+
 private:
     map<dice_hash, int> dice_count_;
+    map<int, map<int, shared<room>>> rooms_;
+    int gold_ = 0;
     random rng_;
+};
+
+struct growing_number
+{
+    virtual ~growing_number() = default;
+    virtual double next(double) const = 0;
+};
+
+struct upgrade
+{
+    upgrade() = default;
+    upgrade(double v, growing_number *vadd,
+            double p, growing_number *padd,
+            int lvl_max, str description);
+    bool level_up(state &s);
+    int value_ceil() const { return ceil(value_); }
+    int value_floor() const { return floor(value_); }
+    double value() const { return value_; }
+    void draw(ui &) const;
+    str description;
+private:
+    double value_next() const;
+    int price() const;
+    double value_ = 0;
+    shared<growing_number> value_grow = nullptr;
+    double price_ = 0;
+    shared<growing_number> price_grow = nullptr;
+    int level_max_ = -1;
+    int level_ = 1;
 };
 
 struct room
@@ -61,19 +130,82 @@ struct room
     virtual ~room() = default;
     bool activate(state &);
     int activates_ = 0;
+    int upgrade_count() const { return upgrades_.size(); }
+    void draw(ui &) const;
 protected:
     virtual bool activate_(state &) { return false; }
     virtual int activates_max_() const { return 1; }
+    virtual str name_() const { return "Room"; }
+    virtual void draw_info_(ui &) const {}
+    void add_upgrade(int, upgrade);
+    int upgrade_value_ceil(int u) const { return upgrades_[u].value_ceil(); }
+    int upgrade_value_floor(int u) const { return upgrades_[u].value_floor(); }
+    int upgrade_value_multiplier(int u, int x) const { return floor(upgrades_[u].value() * x); }
+private:
+    map<int, upgrade> upgrades_;
+};
+
+// content impl
+
+struct linear_growing_number : growing_number
+{
+    linear_growing_number(double inc) : inc_(inc) {}
+    double next(double v) const override { return v + inc_; }
+private:
+    double inc_ = 0;
+};
+
+struct multiply_growing_number : growing_number
+{
+    multiply_growing_number(double mult) : mult_(mult) {}
+    double next(double v) const override { return v * mult_; }
+private:
+    double mult_ = 0;
 };
 
 struct herbalist : room
 {
+    str name_() const override { return "Herbalist"; }
+    enum { activates };
+    herbalist();
     bool activate_(state &s) override;
+    int activates_max_() const override;
+    void draw_info_(ui &o) const override;
 };
 
 struct seller : room
 {
+    str name_() const override { return "Leftovers Salesman"; }
+    enum { money_mult };
+    seller();
     bool activate_(state &s) override;
+    int activates_max_() const override;
+    void draw_info_(ui &o) const override;
+};
+
+struct ui_cmd : ui
+{
+    ui_cmd(out &o) : o(o) {}
+    ui &operator<<(int) override;
+    ui &operator<<(double) override;
+    ui &operator<<(str) override;
+    ui &operator<<(symbol) override;
+    void flush() override { o.flush(); }
+    void begin_room() override;
+    void end_room() override;
+    void begin_upgrade() override;
+    void end_upgrade() override;
+    void begin_button() override;
+    void end_button() override;
+    void begin_paragraph() override;
+    void end_paragraph() override;
+private:
+    out &o;
+    enum scope { scope_room, scope_upgrade, scope_btn, scope_p };
+    static str scope_str(scope s);
+    list<scope> scopes_stack_;
+    void push_scope(scope);
+    void pop_scope(scope);
 };
 
 }
