@@ -62,6 +62,32 @@ struct ui
         d6_first,
         d6_last = d6_first + 5,
     };
+    enum signal
+    {
+        next_roll = 10000,
+        next_roll_10,
+        next_roll_100,
+
+        max_room_x = 10,
+        max_room_y = 10,
+        max_room_actions = 900,
+        max_room_upgrades = 100,
+        max_room_signals = max_room_actions + max_room_upgrades,
+        room_upgrade_first = 20000,
+        room_upgrade_last  = room_upgrade_first + max_room_x * max_room_y * max_room_signals - 1,
+        room_action_sell = 1,
+        room_action_move_left,
+        room_action_move_right,
+        room_action_move_up,
+        room_action_move_down,
+    };
+    static signal mk_signal(int x, int y, int u);
+    static signal mk_room_action(int x, int y, int u);
+    static signal mk_room_upgrade(int x, int y, int u);
+    static bool rd_signal(signal, int &x, int &y, int &u);
+    static bool rd_room_action(signal, int &x, int &y, int &u);
+    static bool rd_room_upgrade(signal, int &x, int &y, int &u);
+
     virtual ~ui() = default;
     virtual ui &operator<<(int) = 0;
     virtual ui &operator<<(double) = 0;
@@ -73,7 +99,7 @@ struct ui
     virtual void end_room() {}
     virtual void begin_upgrade() {}
     virtual void end_upgrade() {}
-    virtual void begin_button(str) {}
+    virtual void begin_button(signal) {}
     virtual void end_button() {}
     virtual void begin_paragraph() {}
     virtual void end_paragraph() {}
@@ -97,7 +123,9 @@ struct state
 
     int gold() const { return gold_; }
     void draw(ui &) const;
-    bool btn(str);
+    bool btn(ui::signal);
+    bool move_room(int x, int y, int xmod, int ymod);
+    bool sell_room(int x, int y);
 
 private:
     map<dice_hash, int> dice_count_;
@@ -122,7 +150,7 @@ struct  upgrade
     int value_ceil() const { return ceil(value_); }
     int value_floor() const { return floor(value_); }
     double value() const { return value_; }
-    void draw(ui &) const;
+    void draw(ui &, ui::signal) const;
     str description;
 private:
     double value_next() const;
@@ -141,7 +169,8 @@ struct room
     bool activate(state &);
     int activates_ = 0;
     int upgrade_count() const { return upgrades_.size(); }
-    void draw(ui &) const;
+    bool level_up_upgrade(int u, state &s);
+    void draw(ui &, int x, int y) const;
 protected:
     virtual bool activate_(state &) { return false; }
     virtual int activates_max_() const { return 1; }
@@ -222,7 +251,7 @@ struct ui_cmd : ui
     void end_room() override;
     void begin_upgrade() override;
     void end_upgrade() override;
-    void begin_button(str s) override;
+    void begin_button(signal) override;
     void end_button() override;
     void begin_paragraph() override;
     void end_paragraph() override;
