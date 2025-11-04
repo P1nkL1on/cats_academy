@@ -67,7 +67,7 @@ struct ui
     virtual void end_room() {}
     virtual void begin_upgrade() {}
     virtual void end_upgrade() {}
-    virtual void begin_button() {}
+    virtual void begin_button(str) {}
     virtual void end_button() {}
     virtual void begin_paragraph() {}
     virtual void end_paragraph() {}
@@ -91,6 +91,7 @@ struct state
 
     int gold() const { return gold_; }
     void draw(ui &) const;
+    bool btn(str);
 
 private:
     map<dice_hash, int> dice_count_;
@@ -198,7 +199,7 @@ struct ui_cmd : ui
     void end_room() override;
     void begin_upgrade() override;
     void end_upgrade() override;
-    void begin_button() override;
+    void begin_button(str s) override;
     void end_button() override;
     void begin_paragraph() override;
     void end_paragraph() override;

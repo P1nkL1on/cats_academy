@@ -25,15 +25,21 @@ int main(int argc, char **argv)
 
     QApplication app(argc, argv);
     auto *te = new QTextBrowser;
+    te->setReadOnly(true);
     te->showMaximized();
-    QObject::connect(te, &QTextBrowser::anchorClicked, [](const QUrl &url){
-        cout << "clicked: '" << qPrintable(url.toString()) << "'\n";
-    });
 
     ui_QTextEdit u(te);
     s.ui_ = &u;
     s.draw(u);
 
+    QObject::connect(te, &QTextBrowser::anchorClicked, [&s, &u](const QUrl &url){
+        const str btn = url.toString().toStdString();
+        const bool ok = s.btn(btn);
+        cout << "> button pressed '" << btn << "': " << (ok ? "OK" : "ignored") << '\n';
+        cout.flush();
+        if (!ok)
+            s.draw(u); // since invalid link makes a QTextBrowser empty
+    });
     return app.exec();
 }
 
@@ -275,7 +281,7 @@ void state::draw(ui &o) const
     o << "Gold: " << gold() << ui::gold;
     o << " Rolls: " << rolls;
     o << " ";
-    o.begin_button();
+    o.begin_button("next_roll");
     o << "Next roll";
     o.end_button();
     o.end_paragraph();
@@ -305,6 +311,16 @@ void state::draw(ui &o) const
             r->draw(o);
     o.end_list();
     o.flush();
+}
+
+bool state::btn(str s)
+{
+    if (s == "next_roll") {
+        next_roll();
+        return true;
+    }
+
+    return false;
 }
 
 upgrade::upgrade(
@@ -344,7 +360,7 @@ void upgrade::draw(ui &o) const
 
     if (level_max_ == -1 || level_ < level_max_) {
         o << " ";
-        o.begin_button();
+        o.begin_button("upgrade_uid=helloworld");
         o << "upgrade for " << price() << ui::gold;
         o.end_button();
     }
@@ -414,10 +430,10 @@ void ui_cmd::end_upgrade()
     pop_scope(scope_upgrade);
 }
 
-void ui_cmd::begin_button()
+void ui_cmd::begin_button(str s)
 {
     push_scope(scope_btn);
-    o << "<a href=\"next_roll\">";
+    o << "<a href=\"" << s << "\">";
 }
 
 void ui_cmd::end_button()
