@@ -95,6 +95,7 @@ struct ui
     virtual ui &operator<<(double) = 0;
     virtual ui &operator<<(str) = 0;
     virtual ui &operator<<(symbol) = 0;
+    virtual void nl() {}
     virtual void flush() {}
 
     virtual void begin_room() {}
@@ -256,6 +257,19 @@ struct splitter : room_duplicate<splitter>
     void draw_info(ui &o) const override;
 };
 
+struct debt_collector : room_duplicate<debt_collector>
+{
+    enum { total_take_percent, bribed };
+    debt_collector(int waits_gold = 0);
+    str name() const override { return "Debt Collector"; }
+    bool activate_(state &s) override;
+    void draw_info(ui &o) const override;
+    int price() const override;
+    int waits_gold_ = 0;
+private:
+    int waits_gold_total_ = 0;
+};
+
 struct ui_cmd : ui
 {
     ui_cmd(out &o) : o(o) {}
@@ -263,6 +277,7 @@ struct ui_cmd : ui
     ui &operator<<(double) override;
     ui &operator<<(str) override;
     ui &operator<<(symbol) override;
+    void nl() override { o << "<br>"; }
     void flush() override { o.flush(); }
     void begin_room() override;
     void end_room() override;

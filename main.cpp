@@ -138,7 +138,6 @@ bool state::inc_dice(dice_hash dh, int added)
 
 bool state::inc_gold(int added)
 {
-    assert(added);
     if (added < 0 && -added > gold_)
         return false;
 
@@ -244,10 +243,13 @@ void room::draw(ui &o, int r) const
                 o << " left)";
             }
         }
-        {
+        o.nl();
+        if (price() >= 0) {
             o.begin_button(ui::mk_room_action(r, ui::room_action_sell));
             o << "Sell for " << (price() * level()) << ui::gold;
             o.end_button();
+        }
+        {
             o.begin_button(ui::mk_room_action(r, ui::room_action_move_up));
             o << "Move up";
             o.end_button();
@@ -296,6 +298,20 @@ void state::next_roll()
         r->activates_ = 0;
 
     rolls++;
+    switch (rolls) {
+    case 100:
+        insert_room(rooms_.size(), new debt_collector(2000));
+        break;
+    case 200:
+        insert_room(rooms_.size(), new debt_collector(5000));
+        break;
+    case 300:
+        insert_room(rooms_.size(), new debt_collector(10000));
+        break;
+    default:
+        break;
+    }
+
     if (ui_)
         draw(*ui_);
 }
@@ -376,14 +392,16 @@ bool state::btn(ui::signal s)
         return true;
     }
     if (s == ui::next_roll_10) {
-        int count = 10;
-        while (count--)
+        next_roll();
+        int count = 9;
+        while (count-- && rolls % 100)
             next_roll();
         return true;
     }
     if (s == ui::next_roll_100) {
-        int count = 100;
-        while (count--)
+        next_roll();
+        int count = 99;
+        while (count-- && rolls % 100)
             next_roll();
         return true;
     }
@@ -515,7 +533,7 @@ void upgrade::draw(ui &o, ui::signal s) const
     if (level_max_ != 0 && level_ < level_max_)
         o << value() << " -> " << value_next();
     else
-        o << "MAX";
+        o << value() << " (MAX)";
 
     if (level_max_ == -1 || level_ < level_max_) {
         o << " ";
@@ -809,6 +827,51 @@ bool ui::rd_room_buy(signal s, int &b)
         return false;
     b = (s - room_buy_first);
     return true;
+}
+
+debt_collector::debt_collector(int waits_gold) :
+    waits_gold_(waits_gold), waits_gold_total_(waits_gold)
+{
+    assert(waits_gold >= 0);
+    add_upgrade(total_take_percent, upgrade(
+                    0.05, new linear_growing_number(-0.01),
+                    50, new multiply_growing_number(1.2),
+                    4, "% of total debt taken per activation"
+                ));
+    add_upgrade(bribed, upgrade(
+                    1, new linear_growing_number(-0.01),
+                    100, new multiply_growing_number(2),
+                    10, "% of debt awaiting"
+                ));
+}
+
+bool debt_collector::activate_(state &s)
+{
+    if (!waits_gold_)
+        return false;
+
+    int can_take_per_time = upgrade_value_multiplier(total_take_percent, waits_gold_total_);
+    int can_take = min(s.gold(), min(waits_gold_, can_take_per_time));
+    if (!s.inc_gold(-upgrade_value_multiplier(bribed, can_take)))
+        return false;
+
+    waits_gold_ -= can_take;
+    return true;
+}
+
+void debt_collector::draw_info(ui &o) const
+{
+    if (waits_gold_) {
+        o << "came to collect debt " << waits_gold_ << ui::gold <<
+             " (of the total " << waits_gold_total_ << ui::gold << ")";
+        return;
+    }
+    o << "collected all the " << waits_gold_total_ << ui::gold << " debt, now chills";
+}
+
+int debt_collector::price() const
+{
+    return waits_gold_ ? -1 : 0;
 }
 
 }
