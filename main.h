@@ -1,9 +1,12 @@
 #include <QMap>
 #include <QRandomGenerator>
+#include <QTextBrowser>
+
 #include <functional>
 #include <memory>
 #include <string>
 #include <iostream>
+#include <sstream>
 
 namespace ca {
 
@@ -13,6 +16,7 @@ template<typename t> using list = QList<t>;
 template<typename t> using shared = std::shared_ptr<t>;
 using str = std::string;
 using out = std::ostream;
+using strout = std::stringstream;
 using random = QRandomGenerator;
 
 enum dice_type
@@ -61,15 +65,14 @@ struct ui
 
     virtual void begin_room() {}
     virtual void end_room() {}
-
     virtual void begin_upgrade() {}
     virtual void end_upgrade() {}
-
     virtual void begin_button() {}
     virtual void end_button() {}
-
     virtual void begin_paragraph() {}
     virtual void end_paragraph() {}
+    virtual void begin_list() {}
+    virtual void end_list() {}
 };
 
 struct state
@@ -199,13 +202,24 @@ struct ui_cmd : ui
     void end_button() override;
     void begin_paragraph() override;
     void end_paragraph() override;
+    void begin_list() override;
+    void end_list() override;
 private:
     out &o;
-    enum scope { scope_room, scope_upgrade, scope_btn, scope_p };
+    enum scope { scope_room, scope_upgrade, scope_btn, scope_p, scope_ul };
     static str scope_str(scope s);
     list<scope> scopes_stack_;
     void push_scope(scope);
     void pop_scope(scope);
+};
+
+struct ui_QTextEdit : ui_cmd
+{
+    ui_QTextEdit(QTextBrowser *te) : ui_cmd(s_), te_(te) { assert(te); }
+    void flush() override;
+private:
+    strout s_;
+    QTextBrowser *te_ = nullptr;
 };
 
 }

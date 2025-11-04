@@ -1,11 +1,16 @@
 #include <main.h>
+
+#include <QThread>
+#include <QApplication>
+#include <QDebug>
+
 #include <cassert>
 #include <algorithm>
 #include <iostream>
 
 using namespace std;
 
-int main()
+int main(int argc, char **argv)
 {
     using namespace ca;
     state s;
@@ -18,12 +23,18 @@ int main()
 
     s.set_room(10, 0, new seller);
 
-    ui_cmd u(cout);
-    s.ui_ = &u;
+    QApplication app(argc, argv);
+    auto *te = new QTextBrowser;
+    te->showMaximized();
+    QObject::connect(te, &QTextBrowser::anchorClicked, [](const QUrl &url){
+        cout << "clicked: '" << qPrintable(url.toString()) << "'\n";
+    });
 
-    while(s.rolls < 1)
-        s.next_roll();
-    return 0;
+    ui_QTextEdit u(te);
+    s.ui_ = &u;
+    s.draw(u);
+
+    return app.exec();
 }
 
 namespace ca {
@@ -210,8 +221,10 @@ void room::draw(ui &o) const
 //            o << "Move after";
 //            o.end_button();
 //        }
+        o.begin_list();
         for (const upgrade &u : upgrades_)
             u.draw(o);
+        o.end_list();
     }
     o.end_room();
 }
@@ -237,10 +250,8 @@ void state::next_roll()
 
             if (!used)
                 break;
-            if (ui_) {
+            if (ui_)
                 draw(*ui_);
-                ui_->flush();
-            }
         }
     }
 
@@ -249,10 +260,8 @@ void state::next_roll()
             r->activates_ = 0;
 
     rolls++;
-    if (ui_) {
+    if (ui_)
         draw(*ui_);
-        ui_->flush();
-    }
 }
 
 void state::reset()
@@ -265,6 +274,10 @@ void state::draw(ui &o) const
     o.begin_paragraph();
     o << "Gold: " << gold() << ui::gold;
     o << " Rolls: " << rolls;
+    o << " ";
+    o.begin_button();
+    o << "Next roll";
+    o.end_button();
     o.end_paragraph();
 
     o.begin_paragraph();
@@ -285,12 +298,13 @@ void state::draw(ui &o) const
     }
     o.end_paragraph();
 
-    o.begin_paragraph();
     o << "Rooms: ";
+    o.begin_list();
     for (const auto &ys : qAsConst(rooms_))
         for (const shared<room> &r : ys)
             r->draw(o);
-    o.end_paragraph();
+    o.end_list();
+    o.flush();
 }
 
 upgrade::upgrade(
@@ -323,7 +337,7 @@ bool upgrade::level_up(state &s)
 void upgrade::draw(ui &o) const
 {
     o.begin_upgrade();
-    o << description << "(lvl " << level_ ;
+    o << description << " (lvl " << level_ ;
     if (level_max_ > 0)
         o << '/' << level_max_;
     o << "): " << value() << " -> " << value_next();
@@ -379,30 +393,36 @@ ui &ui_cmd::operator <<(symbol s)
 void ui_cmd::begin_room()
 {
     push_scope(scope_room);
+    o << "<li>";
 }
 
 void ui_cmd::end_room()
 {
+    o << "</li>";
     pop_scope(scope_room);
 }
 
 void ui_cmd::begin_upgrade()
 {
     push_scope(scope_upgrade);
+    o << "<li>";
 }
 
 void ui_cmd::end_upgrade()
 {
+    o << "</li>";
     pop_scope(scope_upgrade);
 }
 
 void ui_cmd::begin_button()
 {
     push_scope(scope_btn);
+    o << "<a href=\"next_roll\">";
 }
 
 void ui_cmd::end_button()
 {
+    o << "</a>";
     pop_scope(scope_btn);
 }
 
@@ -416,6 +436,16 @@ void ui_cmd::end_paragraph()
     pop_scope(scope_p);
 }
 
+void ui_cmd::begin_list()
+{
+    push_scope(scope_ul);
+}
+
+void ui_cmd::end_list()
+{
+    pop_scope(scope_ul);
+}
+
 str ui_cmd::scope_str(scope s)
 {
     switch (s) {
@@ -427,6 +457,8 @@ str ui_cmd::scope_str(scope s)
         return "btn";
     case scope_p:
         return "p";
+    case scope_ul:
+        return "ul";
     default:
         break;
     }
@@ -451,6 +483,18 @@ void ui_cmd::pop_scope(scope s)
     o << "</" << scope_str(s) << ">";
     assert(scopes_stack_.size() && scopes_stack_.last() == s);
     scopes_stack_.pop_back();
+}
+
+void ui_QTextEdit::flush()
+{
+    ui_cmd::flush();
+    const str flushed = s_.str();
+    s_.str("");
+    if (te_) {
+        te_->setHtml(QString::fromStdString(flushed));
+        QThread::msleep(100);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
 }
 
 }
